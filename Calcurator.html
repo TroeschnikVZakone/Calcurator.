@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор со звуком и анимацией</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #2c3e50, #4ca1af);
+        }
+        .calculator {
+            background: #1e272e;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            padding: 24px;
+            width: 320px;
+        }
+        .display {
+            background: #2d3436;
+            color: #fff;
+            font-size: 2.5rem;
+            text-align: right;
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            min-height: 80px;
+            word-wrap: break-word;
+            word-break: break-all;
+            transition: transform 0.15s, box-shadow 0.15s;
+            box-shadow: inset 0 0 0 rgba(0,0,0,0);
+        }
+        /* Анимация "всплытия" при успешном вычислении */
+        .display.pop {
+            animation: popEffect 0.3s ease;
+        }
+        /* Дрожание при ошибке */
+        .display.shake {
+            animation: shakeEffect 0.3s ease;
+        }
+        @keyframes popEffect {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.03); }
+            100% { transform: scale(1); }
+        }
+        @keyframes shakeEffect {
+            0%,100% { transform: translateX(0); }
+            20% { transform: translateX(-5px); }
+            40% { transform: translateX(5px); }
+            60% { transform: translateX(-3px); }
+            80% { transform: translateX(3px); }
+        }
+        .buttons {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+        button {
+            background: #2d3436;
+            color: white;
+            border: none;
+            font-size: 1.4rem;
+            padding: 18px 0;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s, box-shadow 0.1s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            outline: none;
+            /* Предотвращаем двойной tap на мобильных */
+            touch-action: manipulation;
+        }
+        button:hover {
+            filter: brightness(1.2);
+        }
+        button:active {
+            filter: brightness(0.9);
+        }
+        /* Класс для анимации нажатия (добавляется JS) */
+        button.pressed {
+            transform: scale(0.9);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+        button.operator {
+            background: #e67e22;
+            color: white;
+        }
+        button.operator:hover {
+            background: #d35400;
+        }
+        button.clear {
+            background: #c0392b;
+            color: white;
+        }
+        button.clear:hover {
+            background: #a93226;
+        }
+        button.equal {
+            background: #27ae60;
+            color: white;
+            grid-column: span 2;
+        }
+        button.equal:hover {
+            background: #219a52;
+        }
+        button.zero {
+            grid-column: span 2;
+        }
+    </style>
+</head>
+<body>
+    <div class="calculator">
+        <div class="display" id="display">0</div>
+        <div class="buttons">
+            <button class="clear" onclick="clearDisplay()">C</button>
+            <button onclick="deleteLast()">⌫</button>
+            <button class="operator" onclick="appendOperator('%')">%</button>
+            <button class="operator" onclick="appendOperator('/')">÷</button>
+
+            <button onclick="appendNumber('7')">7</button>
+            <button onclick="appendNumber('8')">8</button>
+            <button onclick="appendNumber('9')">9</button>
+            <button class="operator" onclick="appendOperator('*')">×</button>
+
+            <button onclick="appendNumber('4')">4</button>
+            <button onclick="appendNumber('5')">5</button>
+            <button onclick="appendNumber('6')">6</button>
+            <button class="operator" onclick="appendOperator('-')">−</button>
+
+            <button onclick="appendNumber('1')">1</button>
+            <button onclick="appendNumber('2')">2</button>
+            <button onclick="appendNumber('3')">3</button>
+            <button class="operator" onclick="appendOperator('+')">+</button>
+
+            <button class="zero" onclick="appendNumber('0')">0</button>
+            <button onclick="appendDot()">.</button>
+            <button class="equal" onclick="calculate()">=</button>
+        </div>
+    </div>
+
+    <script>
+        // ============ ЗВУКОВОЙ ДВИЖОК ============
+        let audioCtx = null;
+
+        // Инициализация AudioContext при первом взаимодействии (требование браузеров)
+        function initAudio() {
+            if (!audioCtx) {
+                try {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (e) {
+                    console.warn('Web Audio API не поддерживается');
+                }
+            }
+            // Возобновляем контекст, если он был приостановлен (политика автовоспроизведения)
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        // Генератор простого звука (пищика)
+        function playSound(frequency, duration, type = 'sine', volume = 0.3) {
+            if (!audioCtx) return;
+            try {
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+
+                oscillator.type = type;
+                oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + duration);
+            } catch (e) {
+                // Игнорируем ошибки (например, неподдерживаемый тип)
+            }
+        }
+
+        // Шумоподобный звук для кнопки C (белый шум)
+        function playNoise(duration = 0.05, volume = 0.15) {
+            if (!audioCtx) return;
+            try {
+                const bufferSize = audioCtx.sampleRate * duration;
+                const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = (Math.random() * 2 - 1) * volume;
+                }
+                const noise = audioCtx.createBufferSource();
+                noise.buffer = buffer;
+                const gainNode = audioCtx.createGain();
+                gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                noise.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                noise.start(audioCtx.currentTime);
+                noise.stop(audioCtx.currentTime + duration);
+            } catch (e) {}
+        }
+
+        // Привязываем звуки к каждому типу кнопки
+        function playButtonSound(type) {
+            initAudio();
+            switch(type) {
+                case 'number':
+                    playSound(220, 0.1, 'sine', 0.2);
+                    break;
+                case 'operator':
+                    playSound(440, 0.1, 'triangle', 0.2);
+                    break;
+                case 'clear':
+                    playNoise(0.05, 0.2);
+                    break;
+                case 'delete':
+                    playSound(330, 0.08, 'square', 0.15);
+                    break;
+                case 'equal':
+                    playSound(330, 0.08, 'sine', 0.25);
+                    setTimeout(() => playSound(660, 0.12, 'sine', 0.25), 80);
+                    break;
+                default: break;
+            }
+        }
+
+        // ============ АНИМАЦИЯ НАЖАТИЙ ============
+        // Добавляем всем кнопкам эффект pressed через глобальные слушатели
+        document.querySelectorAll('button').forEach(btn => {
+            const pressStart = () => {
+                btn.classList.add('pressed');
+            };
+            const pressEnd = () => {
+                btn.classList.remove('pressed');
+            };
+            btn.addEventListener('mousedown', pressStart);
+            btn.addEventListener('mouseup', pressEnd);
+            btn.addEventListener('mouseleave', pressEnd); // если курсор ушёл за пределы
+            btn.addEventListener('touchstart', pressStart, {passive: true});
+            btn.addEventListener('touchend', pressEnd);
+            btn.addEventListener('touchcancel', pressEnd);
+        });
+
+        // Анимация дисплея: лёгкая вспышка при любом действии
+        function flashDisplay() {
+            const display = document.getElementById('display');
+            display.style.boxShadow = 'inset 0 0 15px rgba(255,255,255,0.15)';
+            setTimeout(() => {
+                display.style.boxShadow = 'inset 0 0 0 rgba(0,0,0,0)';
+            }, 150);
+        }
+
+        function animateDisplayEffect(effectClass) {
+            const display = document.getElementById('display');
+            display.classList.add(effectClass);
+            setTimeout(() => {
+                display.classList.remove(effectClass);
+            }, 300);
+        }
+
+        // ============ ЛОГИКА КАЛЬКУЛЯТОРА ============
+        const displayEl = document.getElementById('display');
+        let currentInput = '0';
+        let shouldResetDisplay = false;
+
+        function updateDisplay() {
+            displayEl.textContent = currentInput;
+        }
+
+        function appendNumber(number) {
+            playButtonSound('number');
+            flashDisplay();
+            if (currentInput === '0' || shouldResetDisplay) {
+                currentInput = number;
+                shouldResetDisplay = false;
+            } else {
+                currentInput += number;
+            }
+            updateDisplay();
+        }
+
+        function appendOperator(op) {
+            playButtonSound('operator');
+            flashDisplay();
+            const lastChar = currentInput.slice(-1);
+            if ('+-*/%'.includes(lastChar)) {
+                currentInput = currentInput.slice(0, -1) + op;
+            } else {
+                currentInput += op;
+            }
+            shouldResetDisplay = false;
+            updateDisplay();
+        }
+
+        function appendDot() {
+            playButtonSound('number');
+            flashDisplay();
+            if (shouldResetDisplay) {
+                currentInput = '0.';
+                shouldResetDisplay = false;
+                updateDisplay();
+                return;
+            }
+            const parts = currentInput.split(/[\+\-\*\/\%]/);
+            const lastNumber = parts[parts.length - 1];
+            if (!lastNumber.includes('.')) {
+                currentInput += '.';
+            }
+            updateDisplay();
+        }
+
+        function clearDisplay() {
+            playButtonSound('clear');
+            flashDisplay();
+            currentInput = '0';
+            shouldResetDisplay = false;
+            updateDisplay();
+        }
+
+        function deleteLast() {
+            playButtonSound('delete');
+            flashDisplay();
+            if (currentInput.length === 1 || (currentInput.length === 2 && currentInput.startsWith('-'))) {
+                currentInput = '0';
+            } else {
+                currentInput = currentInput.slice(0, -1);
+            }
+            updateDisplay();
+        }
+
+        function calculate() {
+            playButtonSound('equal');
+            flashDisplay();
+            try {
+                let expression = currentInput
+                    .replace(/×/g, '*')
+                    .replace(/÷/g, '/')
+                    .replace(/\%/g, '/100');
+                const result = eval(expression);
+                if (result === undefined || isNaN(result) || !isFinite(result)) {
+                    currentInput = 'Ошибка';
+                    animateDisplayEffect('shake');
+                } else {
+                    currentInput = String(Number(result.toFixed(10)));
+                    animateDisplayEffect('pop');
+                }
+            } catch (e) {
+                currentInput = 'Ошибка';
+                animateDisplayEffect('shake');
+            }
+            shouldResetDisplay = true;
+            updateDisplay();
+        }
+    </script>
+</body>
+</html>
